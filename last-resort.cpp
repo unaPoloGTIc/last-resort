@@ -111,11 +111,11 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   
   auto gpHomeCstr{pam_getenv(pamh, "GNUPGHOME")};
   string gnupgHome{gpHomeCstr?gpHomeCstr:".gnupg"s};
-  gpgme_ctx_raii ctx{homeDir+"/"s+gnupgHome /*"/home/sharon/.gnupg/"s*/};
+  gpgme_ctx_raii ctx{homeDir+"/"s+gnupgHome};
   //TODO: read from config
   string trustedFprt{"9F15E1BA23DDB0B96CECE7A8D8455CE990619303"s};
-  string sigPath{"/tmp/sig"s};
-  string currentPath{"/tmp/current"s};
+  string sigPath{"/media/sharon/technician/sig"s /*"/tmp/sig"s*/};
+  string currentPath{"/home/sharon/.lastresort_rollingstate"s /*"/tmp/current"s*/};
   string machineId{"devmachine1"s};
   string nextNonce{getNonce(10)};
   string nextRotate{machineId + " "s + nextNonce};

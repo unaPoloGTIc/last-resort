@@ -19,6 +19,9 @@ using namespace std;
 namespace fs = std::filesystem;
 using namespace commonRaii;
 
+string sigFile{"/media/sharon/technician/sig"s};
+string currFile{"/home/sharon/.lastresort_rollingstate"s};
+
 TEST(unitTests, emptyTest)
 {
   pam_handle_t *pamh;
@@ -75,7 +78,7 @@ public:
     pam_conversation.appdata_ptr = nullptr;
     pam_set_item(pamh, PAM_CONV, static_cast<const void*>(&pam_conversation));
     globalRet.clear();
-    fs::remove("/tmp/sig"s);
+    fs::remove(sigFile);
   }
   ~Unit()
   {
@@ -109,7 +112,7 @@ TEST_F(Unit, testNoSigFile)
 
 TEST_F(Unit, testBadSigFile)
 {
-  ofstream ovwrtSig("/tmp/sig"s);
+  ofstream ovwrtSig(sigFile);
   ovwrtSig << "badBad sigSig\n" << flush;
   ovwrtSig.close();
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_PERM_DENIED);
@@ -149,7 +152,7 @@ TEST_F(Unit, testWrongSigFileWrongMachineId)
   string phonymsg{"badMachine "s + nonce};
 
   string sig{getSig(phonymsg, "vendor@mmodt.com"s)};
-  ofstream putSig{"/tmp/sig"};
+  ofstream putSig{sigFile};
   putSig << sig << flush;
   putSig.close();
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_PERM_DENIED);
@@ -157,7 +160,7 @@ TEST_F(Unit, testWrongSigFileWrongMachineId)
 
 TEST_F(Unit, testWrongSigFileWrongNonce)
 {
-  ifstream curr{"/tmp/current"s};
+  ifstream curr{currFile};
   ASSERT_TRUE(curr.is_open());
   ASSERT_TRUE(curr.good());
   string readCurr{};
@@ -166,7 +169,7 @@ TEST_F(Unit, testWrongSigFileWrongNonce)
   string phonymsg{machindeId + " badNonce"s};
   
   string sig{getSig(phonymsg, "vendor@mmodt.com"s)};
-  ofstream putSig{"/tmp/sig"};
+  ofstream putSig{sigFile};
   putSig << sig << flush;
   putSig.close();
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_PERM_DENIED);
@@ -174,25 +177,25 @@ TEST_F(Unit, testWrongSigFileWrongNonce)
 
 TEST_F(Unit, testGoodSigFileWrongFprt)
 {
-  ifstream curr{"/tmp/current"s};
+  ifstream curr{currFile};
   ASSERT_TRUE(curr.is_open());
   ASSERT_TRUE(curr.good());
   string readCurr{};
   getline(curr, readCurr);
   string sig{getSig(readCurr, "appliance@mmodt.com"s)};
-  ofstream putSig{"/tmp/sig"};
+  ofstream putSig{sigFile};
   putSig << sig << flush;
   putSig.close();
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_PERM_DENIED);
 }
 
-string simulateUser()
+string simulateUser(string currSrc)
 {
-  ifstream curr{"/tmp/current"s};
+  ifstream curr{currSrc};
   string readCurr{};
   getline(curr, readCurr);
   string sig{getSig(readCurr, "vendor@mmodt.com"s)};
-  ofstream putSig{"/tmp/sig"};
+  ofstream putSig{sigFile};
   putSig << sig << flush;
   putSig.close();
   return readCurr;
@@ -202,7 +205,18 @@ TEST_F(Unit, testGoodSigFile)
 {
   for (int i{0}; i < 10; i++)
     {
-      simulateUser();
+      simulateUser(currFile);
+      ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+    }
+}
+
+TEST_F(Unit, testSigFileOvrwrt)
+{
+  simulateUser(currFile);
+  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+  for (int i{0}; i < 10; i++)
+    {
+      simulateUser(sigFile);
       ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
     }
 }
@@ -210,7 +224,7 @@ TEST_F(Unit, testGoodSigFile)
 TEST_F(Unit, testCurrentMatchesConv)
 {
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_PERM_DENIED);
-  ifstream curr{"/tmp/current"s};
+  ifstream curr{currFile};
   ASSERT_TRUE(curr.is_open());
   ASSERT_TRUE(curr.good());
   string readCurr{};
@@ -218,11 +232,11 @@ TEST_F(Unit, testCurrentMatchesConv)
   ASSERT_NE(globalRet[0].find(readCurr),string::npos);
 }
 
-TEST_F(Unit, testCurrRotates)
+TEST_F(Unit, testCurrRotatesOnSuccess)
 {
-  auto s1{simulateUser()};
+  auto s1{simulateUser(currFile)};
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
-  auto s2{simulateUser()};
+  auto s2{simulateUser(currFile)};
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
   ASSERT_EQ(s1.substr(0, s1.find(' ')),
 	    s2.substr(0, s2.find(' ')));
@@ -230,16 +244,42 @@ TEST_F(Unit, testCurrRotates)
 	    s2.substr(s2.find(' '), string::npos));
 }
 
-TEST_F(Unit, testConvRotates)
+TEST_F(Unit, testCurrRemainsOnFail)
 {
+  pam_authenticate(pamh, 0);
+  ifstream curr1{currFile};
+  string readCurr1{};
+  getline(curr1, readCurr1);
+  
+  pam_authenticate(pamh, 0);
+  ifstream curr2{currFile};
+  string readCurr2{};
+  getline(curr2, readCurr2);
+  
+  ASSERT_EQ(readCurr1, readCurr2);
+}
+
+TEST_F(Unit, testConvRotatesOnFail)
+{
+  
   pam_authenticate(pamh, 0);
   pam_authenticate(pamh, 0);
   ASSERT_NE(globalRet[0].substr(globalRet[0].find("with: "),string::npos),
 	    globalRet[1].substr(globalRet[1].find("with: "),string::npos));
 }
 
+TEST_F(Unit, testConvRotatesOnSuccess)
+{
+  simulateUser(currFile);
+  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+  simulateUser(currFile);
+  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+  ASSERT_NE(globalRet[0].substr(globalRet[0].find("with: "),string::npos),
+	    globalRet[1].substr(globalRet[1].find("with: "),string::npos));
+}
+
 int main(int argc, char **argv) {
-  ofstream initCurr("/tmp/current"s);
+  ofstream initCurr(currFile);
   initCurr << "devmachine1 initialRatchet" << endl;
   initCurr.close();
   
