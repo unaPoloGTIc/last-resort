@@ -126,7 +126,7 @@ string getSig(string msg, string sender)
   gpgme_data_raii plain{msg};
   gpgme_data_raii sig{};
   gpgme_op_sign (ctx.get(), plain.get(), sig.get(), GPGME_SIG_MODE_NORMAL);
-  constexpr int buffsize{500};
+  constexpr int buffsize{500};//TODO: refactor to func
   char buf[buffsize + 1] = "";
   int ret = gpgme_data_seek (sig.get(), 0, SEEK_SET);
   string s{};
@@ -135,7 +135,6 @@ string getSig(string msg, string sender)
       buf[ret] = '\0';
       s += string{buf};
     }
-  cout << "DBG: "<< msg << endl << s << endl;
   return s;
 }
 
@@ -187,18 +186,25 @@ TEST_F(Unit, testGoodSigFileWrongFprt)
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_PERM_DENIED);
 }
 
-TEST_F(Unit, testGoodSigFile)
+string simulateUser()
 {
   ifstream curr{"/tmp/current"s};
-  ASSERT_TRUE(curr.is_open());
-  ASSERT_TRUE(curr.good());
   string readCurr{};
   getline(curr, readCurr);
   string sig{getSig(readCurr, "vendor@mmodt.com"s)};
   ofstream putSig{"/tmp/sig"};
   putSig << sig << flush;
   putSig.close();
-  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+  return readCurr;
+}
+
+TEST_F(Unit, testGoodSigFile)
+{
+  for (int i{0}; i < 10; i++)
+    {
+      simulateUser();
+      ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+    }
 }
 
 TEST_F(Unit, testCurrentMatchesConv)
@@ -212,29 +218,29 @@ TEST_F(Unit, testCurrentMatchesConv)
   ASSERT_NE(globalRet[0].find(readCurr),string::npos);
 }
 
-TEST_F(Unit, testNextRotates)
-{
-  pam_authenticate(pamh, 0);
-}
-
 TEST_F(Unit, testCurrRotates)
 {
-  pam_authenticate(pamh, 0);
+  auto s1{simulateUser()};
+  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+  auto s2{simulateUser()};
+  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+  ASSERT_EQ(s1.substr(0, s1.find(' ')),
+	    s2.substr(0, s2.find(' ')));
+  ASSERT_NE(s1.substr(s1.find(' '), string::npos),
+	    s2.substr(s2.find(' '), string::npos));
 }
 
 TEST_F(Unit, testConvRotates)
 {
   pam_authenticate(pamh, 0);
-}
-
-TEST_F(Unit, testRotationStress)
-{
-  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_PERM_DENIED);
+  pam_authenticate(pamh, 0);
+  ASSERT_NE(globalRet[0].substr(globalRet[0].find("with: "),string::npos),
+	    globalRet[1].substr(globalRet[1].find("with: "),string::npos));
 }
 
 int main(int argc, char **argv) {
   ofstream initCurr("/tmp/current"s);
-  initCurr << "devmachine1 initialRatchet" << flush;
+  initCurr << "devmachine1 initialRatchet" << endl;
   initCurr.close();
   
   ::testing::InitGoogleTest(&argc, argv);

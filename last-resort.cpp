@@ -87,20 +87,45 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   pam_fail_delay (pamh, 2'000'000);
 #endif /* HAVE_PAM_FAIL_DELAY */
 
-  //TODO: drop privs
+  constexpr auto maxUsernameSize = 100;
+  const char *userChar[maxUsernameSize]{nullptr};
+
+  //get user name, or fail
+  if (pam_get_user(pamh, userChar, nullptr)!=PAM_SUCCESS || !userChar || !*userChar)
+    {
+      pam_syslog(pamh, LOG_WARNING, "pam_get_user() failed");
+      return PAM_USER_UNKNOWN;
+    }
+  string user{*userChar, maxUsernameSize - 1};
+
+  //get homedir, or fail
+  auto userPw(getpwnam(user.c_str()));
+  if (!userPw)
+    {
+      pam_syslog(pamh, LOG_WARNING, "can't get homedir of pam user");
+      return  PAM_AUTHINFO_UNAVAIL;
+    }
+  string homeDir{userPw->pw_dir};
+  //drop privilleges, or fail
+  privDropper priv{pamh, userPw};
   
+  auto gpHomeCstr{pam_getenv(pamh, "GNUPGHOME")};
+  string gnupgHome{gpHomeCstr?gpHomeCstr:".gnupg"s};
+  gpgme_ctx_raii ctx{homeDir+"/"s+gnupgHome /*"/home/sharon/.gnupg/"s*/};
   //TODO: read from config
-  gpgme_ctx_raii ctx{"/home/sharon/.gnupg/"s};
   string trustedFprt{"9F15E1BA23DDB0B96CECE7A8D8455CE990619303"s};
   string sigPath{"/tmp/sig"s};
   string currentPath{"/tmp/current"s};
-  string nextPath{"/tmp/next"s};
   string machineId{"devmachine1"s};
   string nextNonce{getNonce(10)};
   string nextRotate{machineId + " "s + nextNonce};
-  ifstream curr{currentPath};//TODO: check curr.good(),is_open()
+  //keep curr open to avoid reentrant fs races.
+  fstream curr{currentPath, ios::in | ios::out};//TODO: check curr.good(),is_open()
   string currStr{};//TODO: bulky. use >>
+
   getline(curr, currStr);
+  curr.clear();
+  curr.seekp(0);
 
   if (flags & PAM_SILENT)
     {
@@ -121,8 +146,11 @@ Containing signature of the following by FPRT.
 
   if (validate_string_signed(pamh, ctx, currStr, buffer.str(), trustedFprt))
     {
+      //let the user keep a copy of the next sign requirment
       ofstream sigOvrwrt{sigPath};//TODO: check sigOvrwrt.good(),is_open()
-      sigOvrwrt << nextRotate << flush;
+      sigOvrwrt << nextRotate << endl;
+      //update the module's next sign requirement
+      curr << nextRotate << endl;
       return PAM_SUCCESS;
     }
 
