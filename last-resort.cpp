@@ -40,8 +40,6 @@ bool validate_string_signed( pam_handle_t *pamh, gpgme_ctx_raii& ctx, const stri
   gpgme_data_raii data_sig{sig}, data_plain{};//throws on error
   keyRaii key;
 
-
-  pam_syslog(pamh, LOG_WARNING, string{text + " : " + sig}.c_str());
   key.get() = find_unique_key(ctx, key_str); //TODO: add set() to keyRaii
   if (auto err{gpgme_op_verify (ctx.get(), data_sig.get(), nullptr, data_plain.get())}; err != GPG_ERR_NO_ERROR)
     {
@@ -112,17 +110,36 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   auto gpHomeCstr{pam_getenv(pamh, "GNUPGHOME")};
   string gnupgHome{gpHomeCstr?gpHomeCstr:".gnupg"s};
   gpgme_ctx_raii ctx{homeDir+"/"s+gnupgHome};
-  //TODO: read from config
-  string trustedFprt{"9F15E1BA23DDB0B96CECE7A8D8455CE990619303"s};
-  string sigPath{"/media/sharon/technician/sig"s};
-  string currentPath{"/home/sharon/.lastresort_rollingstate"s};
-  string machineId{"devmachine1"s};
+  string currentPath{homeDir + "/.lastresort_rollingstate"s};
   string nextNonce{getNonce(10)};
-  string nextRotate{machineId + " "s + nextNonce};
-  //keep curr open to avoid reentrant fs races.
-  fstream curr{currentPath, ios::in | ios::out};//TODO: check curr.good(),is_open()
-  string currStr{};//TODO: bulky. use >>
+  fstream curr{currentPath, ios::in | ios::out};//keep curr open to avoid reentrant fs races.
+  string machineId{};
+  string nextRotate{};
+  string currStr{};
+  string trustedFprt{};
+  string sigPath{};//TODO: recourse path
+  ifstream conf{homeDir + "/.lastresort_conf"s};
 
+  if (!conf)
+    {
+      pam_syslog(pamh, LOG_WARNING, "no config found for user");
+      return PAM_IGNORE;
+    }
+  if (!curr || !curr.good() || !curr.is_open())
+    {
+      pam_syslog(pamh, LOG_WARNING, "missing current state");
+      return PAM_AUTH_ERR;
+    }
+  conf >> trustedFprt;
+  if (!conf)
+    {
+      pam_syslog(pamh, LOG_WARNING, "bad config, missing path");
+      return PAM_AUTH_ERR;
+    }
+  conf >> sigPath;
+  curr >> machineId;
+  nextRotate = machineId + " "s + nextNonce;
+  curr.seekg(0);
   getline(curr, currStr);
   curr.clear();
   curr.seekp(0);
@@ -133,9 +150,11 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
       return PAM_IGNORE;
     }
   
-  string clearMsg{R"(Please insert USB drive with SIGFILE.
-Containing signature of the following by FPRT.
-)" + currStr +"\nUpon success SIGFILE will be overwritten with: "s + nextRotate + "\n"};
+  string clearMsg{"Please insert USB drive with SIGFILE.\n"s +
+      "Containing signature of the following (NO NEWLINE):\n"s +
+      currStr + "\nby:\n"s + trustedFprt +
+      "\nUpon success SIGFILE will be overwritten with:\n"s +
+      nextRotate + "\n"};
   
   auto response{converse(pamh, clearMsg)};
 
@@ -154,7 +173,7 @@ Containing signature of the following by FPRT.
       return PAM_SUCCESS;
     }
 
- return PAM_AUTH_ERR;
+  return PAM_AUTH_ERR;
 }
 
 

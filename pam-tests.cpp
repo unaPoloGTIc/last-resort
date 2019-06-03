@@ -36,7 +36,7 @@ TEST(unitTests, emptyTest)
 vector<string> globalRet{};//TODO: move to fixture
 
 int innerConvFunc(int num_msg, const struct pam_message **msg,
-	     struct pam_response **resp, void *appdata_ptr)//TODO: move to fixture
+		  struct pam_response **resp, void *appdata_ptr)//TODO: move to fixture
 {
   globalRet.push_back(string{msg[0]->msg});
   char *deletedByPam = new char[100];
@@ -229,6 +229,7 @@ TEST_F(Unit, testCurrentMatchesConv)
   ASSERT_TRUE(curr.good());
   string readCurr{};
   getline(curr, readCurr);
+  ASSERT_EQ(globalRet.size(), 1);
   ASSERT_NE(globalRet[0].find(readCurr),string::npos);
 }
 
@@ -264,8 +265,9 @@ TEST_F(Unit, testConvRotatesOnFail)
   
   pam_authenticate(pamh, 0);
   pam_authenticate(pamh, 0);
-  ASSERT_NE(globalRet[0].substr(globalRet[0].find("with: "),string::npos),
-	    globalRet[1].substr(globalRet[1].find("with: "),string::npos));
+  ASSERT_EQ(globalRet.size(), 2);
+  ASSERT_NE(globalRet[0].substr(globalRet[0].find("with:"),string::npos),
+	    globalRet[1].substr(globalRet[1].find("with:"),string::npos));
 }
 
 TEST_F(Unit, testConvRotatesOnSuccess)
@@ -274,8 +276,9 @@ TEST_F(Unit, testConvRotatesOnSuccess)
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
   simulateUser(currFile);
   ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
-  ASSERT_NE(globalRet[0].substr(globalRet[0].find("with: "),string::npos),
-	    globalRet[1].substr(globalRet[1].find("with: "),string::npos));
+  ASSERT_EQ(globalRet.size(), 2);
+  ASSERT_NE(globalRet[0].substr(globalRet[0].find("with:"),string::npos),
+	    globalRet[1].substr(globalRet[1].find("with:"),string::npos));
 }
 
 int main(int argc, char **argv) {
