@@ -22,10 +22,12 @@
 #include <chrono>
 #include <boost/algorithm/string.hpp>
 #include <iostream>
+#include <filesystem>
 #include "common-raii/common-raii.h"
 
 using namespace std;
 using namespace commonRaii;
+namespace fs = std::filesystem;
 
 gpgme_key_t find_unique_key(gpgme_ctx_raii& ctx, string fpr)//TODO: move to commonRaii
 {
@@ -74,6 +76,17 @@ bool validate_string_signed( pam_handle_t *pamh, gpgme_ctx_raii& ctx, const stri
   return false;
 }
 
+string recurseFind(string mountPoint, string sigName)
+{
+  for(auto& p: fs::directory_iterator(mountPoint))
+    {
+      string candidate{string{p.path()} + sigName};
+      if (fs::exists(candidate))
+	  return candidate;
+    }
+  return ""s;
+}
+
 /*
   main event.
   validate that the user is able to provide an agreed upon file via USB dongle,
@@ -106,18 +119,18 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   string homeDir{userPw->pw_dir};
   //drop privilleges, or fail
   privDropper priv{pamh, userPw};
-  string sigName{"lastresort.sig"s};
+  string sigName{"/lastresort.sig"s};
   auto gpHomeCstr{pam_getenv(pamh, "GNUPGHOME")};
   string gnupgHome{gpHomeCstr?gpHomeCstr:".gnupg"s};
   gpgme_ctx_raii ctx{homeDir+"/"s+gnupgHome};
   string currentPath{homeDir + "/.lastresort_rollingstate"s};
   string nextNonce{getNonce(10)};
-  fstream curr{currentPath, ios::in | ios::out};//keep curr open to avoid reentrant fs races.
+  fstream curr{currentPath, ios::in | ios::out};
   string machineId{};
   string nextRotate{};
   string currStr{};
   string trustedFprt{};
-  string sigPath{};//TODO: recourse path
+  string mountPoint{};
   ifstream conf{homeDir + "/.lastresort_conf"s};
 
   if (!conf)
@@ -136,7 +149,7 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
       pam_syslog(pamh, LOG_WARNING, "bad config, missing path");
       return PAM_AUTH_ERR;
     }
-  conf >> sigPath;
+  conf >> mountPoint;
   curr >> machineId;
   nextRotate = machineId + " "s + nextNonce;
   curr.seekg(0);
@@ -156,8 +169,18 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
       "\nUpon success " + sigName + " will ratchet forward.\n"};
   
   auto response{converse(pamh, clearMsg)};
-
-  ifstream sigStream{sigPath};//TODO: check sigStream.good(),is_open()
+  string sigPath{recurseFind(mountPoint, sigName)};
+  if (sigPath == ""s)
+    {
+      pam_syslog(pamh, LOG_WARNING, "signature candidate file not found");
+      return PAM_AUTH_ERR;
+    }
+  ifstream sigStream{sigPath};
+  if (!sigStream || !sigStream.good() || !sigStream.is_open())
+    {
+      pam_syslog(pamh, LOG_WARNING, "can't open signature file");
+      return PAM_AUTH_ERR;
+    }
   stringstream buffer;
   buffer << sigStream.rdbuf();
   sigStream.close();
@@ -165,7 +188,8 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   if (validate_string_signed(pamh, ctx, currStr, buffer.str(), trustedFprt))
     {
       //let the user keep a copy of the next sign requirment
-      ofstream sigOvrwrt{sigPath};//TODO: check sigOvrwrt.good(),is_open()
+      //TODO: update sigOvrwrt, curr together atomically
+      ofstream sigOvrwrt{sigPath};
       sigOvrwrt << nextRotate << endl;
       //update the module's next sign requirement
       curr << nextRotate << endl;

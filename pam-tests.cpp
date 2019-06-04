@@ -19,7 +19,8 @@ using namespace std;
 namespace fs = std::filesystem;
 using namespace commonRaii;
 
-string sigFile{"/media/sharon/technician/sig"s};
+string sigFile{"/media/sharon/technician/lastresort.sig"s};
+string mountPoint{"/media/sharon/technician/"s};
 string currFile{"/home/sharon/.lastresort_rollingstate"s};
 
 TEST(unitTests, emptyTest)
@@ -260,32 +261,79 @@ TEST_F(Unit, testCurrRemainsOnFail)
   ASSERT_EQ(readCurr1, readCurr2);
 }
 
-TEST_F(Unit, testConvRotatesOnFail)
-{
+int autoConvFunc(int num_msg, const struct pam_message **msg,
+		  struct pam_response **resp, void *appdata_ptr)//TODO: move to fixture
+{//TODO: remove duplication with Unit
+  stringstream msgStream{string{msg[0]->msg}};
+  char *deletedByPam = new char[100];
+  strcpy(deletedByPam,  "notneeded");
+  pam_response rr{};
+  gpgme_error_t err;
+  gpgme_ctx_t ctx;
+  gpgme_decrypt_flags_t flags = static_cast<gpgme_decrypt_flags_t>(0);
+  gpgme_data_t in = NULL;
+  gpgme_data_t out = NULL;
   
-  pam_authenticate(pamh, 0);
-  pam_authenticate(pamh, 0);
-  ASSERT_EQ(globalRet.size(), 2);
-  ASSERT_NE(globalRet[0].substr(globalRet[0].find("with:"),string::npos),
-	    globalRet[1].substr(globalRet[1].find("with:"),string::npos));
+  rr.resp = deletedByPam;
+  *resp = &rr;
+
+  gpgme_check_version (NULL);
+  gpgme_engine_check_version(GPGME_PROTOCOL_OpenPGP);
+
+  gpgme_new(&ctx);
+  gpgme_ctx_set_engine_info(ctx,
+			    GPGME_PROTOCOL_OpenPGP,
+			    NULL,
+			    "/home/sharon/.gnupg");
+  gpgme_set_protocol(ctx, GPGME_PROTOCOL_OpenPGP);
+
+  string line{};
+  getline(msgStream, line);
+  string sigFileFromMsg{line.substr(line.find_last_of(" ")+1)};
+  getline(msgStream, line);
+  getline(msgStream, line);
+  string readCurr{line};
+  string sigFile{mountPoint + sigFileFromMsg};
+  string sig{getSig(readCurr, "vendor@mmodt.com"s)};
+  ofstream putSig{sigFile};
+  putSig << sig << flush;
+  putSig.close();
+
+  if (out)
+    gpgme_data_release (out);
+  if (in)
+    gpgme_data_release (in);
+  gpgme_release (ctx);
+  globalRet.push_back(readCurr);
+
+  return PAM_SUCCESS;
 }
 
-TEST_F(Unit, testConvRotatesOnSuccess)
+TEST(unittests, fullFlowInConv)//TODO: remove duplication with Unit
 {
-  simulateUser(currFile);
-  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
-  simulateUser(currFile);
-  ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
-  ASSERT_EQ(globalRet.size(), 2);
-  ASSERT_NE(globalRet[0].substr(globalRet[0].find("with:"),string::npos),
-	    globalRet[1].substr(globalRet[1].find("with:"),string::npos));
+  pam_handle_t *pamh;
+  struct pam_conv pam_conversation;
+
+  pam_start("last-resort", "sharon", &pam_conversation, &pamh);
+  pam_conversation.conv = &autoConvFunc;
+  pam_conversation.appdata_ptr = nullptr;
+  pam_set_item(pamh, PAM_CONV, static_cast<const void*>(&pam_conversation));
+  globalRet.clear();
+  int t{10};
+  for (int i{0}; i< t; i++)
+    ASSERT_EQ(pam_authenticate(pamh, 0), PAM_SUCCESS);
+  sort(globalRet.begin(), globalRet.end());
+  vector<string> uniq{globalRet.begin(),
+		      unique(globalRet.begin(), globalRet.end())};
+  ASSERT_EQ(t, uniq.size());
+  pam_end(pamh, PAM_SUCCESS);
 }
 
 int main(int argc, char **argv) {
   ofstream initCurr(currFile);
   initCurr << "devmachine1 initialRatchet" << endl;
   initCurr.close();
-  
+
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
