@@ -106,7 +106,7 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   string homeDir{userPw->pw_dir};
   //drop privilleges, or fail
   privDropper priv{pamh, userPw};
-  
+  string sigName{"lastresort.sig"s};
   auto gpHomeCstr{pam_getenv(pamh, "GNUPGHOME")};
   string gnupgHome{gpHomeCstr?gpHomeCstr:".gnupg"s};
   gpgme_ctx_raii ctx{homeDir+"/"s+gnupgHome};
@@ -150,11 +150,10 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
       return PAM_IGNORE;
     }
   
-  string clearMsg{"Please insert USB drive with SIGFILE.\n"s +
-      "Containing signature of the following (NO NEWLINE):\n"s +
-      currStr + "\nby:\n"s + trustedFprt +
-      "\nUpon success SIGFILE will be overwritten with:\n"s +
-      nextRotate + "\n"};
+  string clearMsg{"Please insert USB drive with "s + sigName +
+      "\nContaining signature of the following (NO NEWLINE):\n"s +
+      currStr + "\nby key corresponding to fingerprint:\n"s + trustedFprt +
+      "\nUpon success " + sigName + " will ratchet forward.\n"};
   
   auto response{converse(pamh, clearMsg)};
 
