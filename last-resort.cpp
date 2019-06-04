@@ -67,7 +67,6 @@ bool validate_string_signed( pam_handle_t *pamh, gpgme_ctx_raii& ctx, const stri
     }
   for (auto s{res->signatures}; s; s = s->next)
     {
-      pam_syslog(pamh, LOG_WARNING, string{"IN FOR: "s + string{key.get()->fpr + " "s +string{s->fpr} }}.c_str());
       if ((s->summary & GPGME_SIGSUM_VALID) &&
 	  string{key.get()->fpr}.find(string{s->fpr}) != string::npos  &&
 	  plainFromSig == text)
