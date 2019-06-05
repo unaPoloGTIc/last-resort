@@ -39,8 +39,13 @@ lastresort.sig will be overwritten with the next rollingstate to be signed for t
 Very similar to the trex-pam.so module by the same authors.  
 With the exceptions that:  
 1: the random challenge only rotates upon success.  
-So brute force attacks are more of an issue, hopefully offset by the requirement of physical presence.  
-(Still, requires signing a guessed 10 char long, a-zA-Z0-9 nonce, given good randomness this puts us at one in over a billion.)
+So brute force attacks are more of an issue,  
+hopefully offset by the requirement of physical presence.  
+(Still, requires signing a guessed 10 char long,  
+a-zA-Z0-9 nonce, given good randomness this puts us at one in over a billion.)  
 2: physical access to plug in a USB drive is required.  
-(at the very least, attacker must be able to mount volumes or overwrite files under $HOME or sign with the corresponding secret key. In all these cases, attacker has won before the module was even written)  
+
+(at the very least, attacker must be able to mount volumes  
+or overwrite files under $HOME or sign with the corresponding secret key.  
+In all these cases, attacker has won before the module was even written)  
 See the analysis in the documentation of trex-pam.so for further details.  
