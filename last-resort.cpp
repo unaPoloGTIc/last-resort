@@ -79,7 +79,7 @@ string recurseFind(string mountPoint, string sigName)
 {
   for(auto& p: fs::directory_iterator(mountPoint))
     {
-      string candidate{string{p.path()} + sigName};
+      string candidate{string{p.path()} + "/"s + sigName};
       if (fs::exists(candidate))
 	  return candidate;
     }
@@ -118,7 +118,7 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   string homeDir{userPw->pw_dir};
   //drop privilleges, or fail
   privDropper priv{pamh, userPw};
-  string sigName{"/lastresort.sig"s};
+  string sigName{"lastresort.sig"s};
   auto gpHomeCstr{pam_getenv(pamh, "GNUPGHOME")};
   string gnupgHome{gpHomeCstr?gpHomeCstr:".gnupg"s};
   gpgme_ctx_raii ctx{homeDir+"/"s+gnupgHome};
