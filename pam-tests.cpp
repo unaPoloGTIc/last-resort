@@ -21,9 +21,10 @@ using namespace std;
 namespace fs = std::filesystem;
 using namespace commonRaii;
 
-string sigFile{"/media/sharon/technician/lastresort.sig"s};
-string mountPoint{"/media/sharon/technician/"s};
-string currFile{"/home/sharon/.lastresort_rollingstate"s};
+string sigFile{"/lastresort.sig"s};
+string currFile{"/.lastresort_rollingstate"s};
+string testMountPoint{"technician"};
+string fngrprnt{}, mntPrefix{}, mountPoint{};
 
 TEST(unitTests, emptyTest)
 {
@@ -156,7 +157,7 @@ TEST_F(Unit, testWrongSigFileWrongMachineId)
   string nonce{readCurr.substr(readCurr.find(' ')+1)};
   string phonymsg{"badMachine "s + nonce};
 
-  string sig{getSig(phonymsg, "vendor@mmodt.com"s)};
+  string sig{getSig(phonymsg, fngrprnt)};
   ofstream putSig{sigFile};
   putSig << sig << flush;
   putSig.close();
@@ -173,7 +174,7 @@ TEST_F(Unit, testWrongSigFileWrongNonce)
   string machindeId{readCurr.substr(0, readCurr.find(' '))};
   string phonymsg{machindeId + " badNonce"s};
   
-  string sig{getSig(phonymsg, "vendor@mmodt.com"s)};
+  string sig{getSig(phonymsg, fngrprnt)};
   ofstream putSig{sigFile};
   putSig << sig << flush;
   putSig.close();
@@ -199,7 +200,7 @@ string simulateUser(string currSrc)
   ifstream curr{currSrc};
   string readCurr{};
   getline(curr, readCurr);
-  string sig{getSig(readCurr, "vendor@mmodt.com"s)};
+  string sig{getSig(readCurr, fngrprnt)};
   ofstream putSig{sigFile};
   putSig << sig << flush;
   putSig.close();
@@ -298,7 +299,7 @@ int autoConvFunc(int num_msg, const struct pam_message **msg,
   getline(msgStream, line);
   string readCurr{line};
   string sigFile{mountPoint + sigFileFromMsg};
-  string sig{getSig(readCurr, "vendor@mmodt.com"s)};
+  string sig{getSig(readCurr, fngrprnt)};
   ofstream putSig{sigFile};
   putSig << sig << flush;
   putSig.close();
@@ -334,10 +335,19 @@ TEST(unittests, fullFlowInConv)//TODO: remove duplication with Unit
 }
 
 int main(int argc, char **argv) {
-  ofstream initCurr(currFile);
-  initCurr << "devmachine1 initialRatchet" << endl;
-  initCurr.close();
+  auto pw{getpwuid(geteuid())};
+  string homePrefix{pw->pw_dir};
+  ifstream conf{homePrefix + "/.lastresort_conf"s};
+  conf >> fngrprnt;
+  conf >> mntPrefix;
 
+  sigFile = mntPrefix + testMountPoint + sigFile;
+  mountPoint = mntPrefix + testMountPoint + "/"s;
+  currFile = homePrefix + currFile;
+  {
+    ofstream initCurr(currFile);
+    initCurr << "devmachine1 initialRatchet"s << endl;
+  }
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
