@@ -13,6 +13,8 @@ extern "C" {
 #include <security/pam_appl.h>
 #include <gpgme.h>
 #include <curl/curl.h>
+#include <sys/types.h>
+#include <pwd.h>
 }
 
 using namespace std;
@@ -28,7 +30,8 @@ TEST(unitTests, emptyTest)
   pam_handle_t *pamh;
   struct pam_conv pam_conversation;
   string module_name{"last-resort"s};
-  string user_name{"sharon"s};
+  auto pw{getpwuid(geteuid())};
+  string user_name{pw->pw_name};
   ASSERT_EQ(pam_start(module_name.c_str(), user_name.c_str(), &pam_conversation, &pamh), PAM_SUCCESS);
   ASSERT_EQ(pam_authenticate(pamh, PAM_SILENT), PAM_PERM_DENIED);
   ASSERT_EQ(pam_end(pamh, PAM_SUCCESS), PAM_SUCCESS);
@@ -63,7 +66,8 @@ protected:
 public:
   Unit()
   {
-    pam_start("last-resort", "sharon", &pam_conversation, &pamh);
+    auto pw{getpwuid(geteuid())};
+    pam_start("last-resort", pw->pw_name, &pam_conversation, &pamh);
 
     gpgme_check_version (NULL);
     gpgme_engine_check_version(GPGME_PROTOCOL_OpenPGP);
@@ -72,7 +76,7 @@ public:
     gpgme_ctx_set_engine_info(ctx,
 			      GPGME_PROTOCOL_OpenPGP,
 			      NULL,
-			      "/home/sharon/.gnupg");
+			      "~/.gnupg");
     gpgme_set_protocol(ctx, GPGME_PROTOCOL_OpenPGP);
 
     pam_conversation.conv = &innerConvFunc;
@@ -284,7 +288,7 @@ int autoConvFunc(int num_msg, const struct pam_message **msg,
   gpgme_ctx_set_engine_info(ctx,
 			    GPGME_PROTOCOL_OpenPGP,
 			    NULL,
-			    "/home/sharon/.gnupg");
+			    "~/.gnupg");
   gpgme_set_protocol(ctx, GPGME_PROTOCOL_OpenPGP);
 
   string line{};
@@ -313,8 +317,8 @@ TEST(unittests, fullFlowInConv)//TODO: remove duplication with Unit
 {
   pam_handle_t *pamh;
   struct pam_conv pam_conversation;
-
-  pam_start("last-resort", "sharon", &pam_conversation, &pamh);
+  auto pw{getpwuid(geteuid())};
+  pam_start("last-resort", pw->pw_name, &pam_conversation, &pamh);
   pam_conversation.conv = &autoConvFunc;
   pam_conversation.appdata_ptr = nullptr;
   pam_set_item(pamh, PAM_CONV, static_cast<const void*>(&pam_conversation));
