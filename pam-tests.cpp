@@ -144,7 +144,7 @@ string getSig(string msg, string sender)
 
 TEST_F(Unit, testWrongSigFileWrongMachineId)
 {
-  ifstream curr{"/tmp/current"s};
+  ifstream curr{currFile};
   ASSERT_TRUE(curr.is_open());
   ASSERT_TRUE(curr.good());
   string readCurr{};
