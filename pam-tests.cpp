@@ -23,7 +23,7 @@ using namespace commonRaii;
 
 string sigFile{"/lastresort.sig"s};
 string currFile{"/.lastresort_rollingstate"s};
-string testMountPoint{"technician"};
+string testMountPoint{"/technician"};
 string fngrprnt{}, mntPrefix{}, mountPoint{};
 
 TEST(unitTests, emptyTest) {
@@ -321,6 +321,11 @@ int main(int argc, char **argv) {
   sigFile = mntPrefix + testMountPoint + sigFile;
   mountPoint = mntPrefix + testMountPoint + "/"s;
   currFile = homePrefix + currFile;
+  cout << fngrprnt << endl;
+  cout << mntPrefix << endl;
+  cout << sigFile << endl;
+  cout << mountPoint << endl;
+  cout << currFile << endl;
   {
     ofstream initCurr(currFile);
     initCurr << "devmachine1 initialRatchet"s << endl;
