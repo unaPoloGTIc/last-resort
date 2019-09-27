@@ -18,71 +18,73 @@
 #define PAM_SM_ACCOUNT
 #define PAM_SM_PASSWORD
 
-#include <fstream>
-#include <chrono>
-#include <boost/algorithm/string.hpp>
-#include <iostream>
-#include <filesystem>
 #include "common-raii/common-raii.h"
+#include <boost/algorithm/string.hpp>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 
 using namespace std;
 using namespace commonRaii;
 namespace fs = std::filesystem;
 
-gpgme_key_t find_unique_key(gpgme_ctx_raii& ctx, string fpr)//TODO: move to commonRaii
+gpgme_key_t find_unique_key(gpgme_ctx_raii &ctx,
+                            string fpr) // TODO: move to commonRaii
 {
   gpgme_key_t key;
-  if (auto err{ gpgme_get_key(ctx.get(), fpr.c_str(), &key, 0)}; err != GPG_ERR_NO_ERROR)
-    throw runtime_error("Can't query for key "s + fpr + " "s + string{gpgme_strerror(err)});
+  if (auto err{gpgme_get_key(ctx.get(), fpr.c_str(), &key, 0)};
+      err != GPG_ERR_NO_ERROR)
+    throw runtime_error("Can't query for key "s + fpr + " "s +
+                        string{gpgme_strerror(err)});
   return key;
 }
 
-bool validate_string_signed( pam_handle_t *pamh, gpgme_ctx_raii& ctx, const string& text, const string& sig, const string& key_str)//TODO: move to commonRaii
+bool validate_string_signed(pam_handle_t *pamh, gpgme_ctx_raii &ctx,
+                            const string &text, const string &sig,
+                            const string &key_str) // TODO: move to commonRaii
 {
-  gpgme_data_raii data_sig{sig}, data_plain{};//throws on error
+  gpgme_data_raii data_sig{sig}, data_plain{}; // throws on error
   keyRaii key;
 
-  key.get() = find_unique_key(ctx, key_str); //TODO: add set() to keyRaii
-  if (auto err{gpgme_op_verify (ctx.get(), data_sig.get(), nullptr, data_plain.get())}; err != GPG_ERR_NO_ERROR)
-    {
-      pam_syslog(pamh, LOG_WARNING, string{"Verification failed "s + gpgme_strerror(err)}.c_str());
-      return false;
-    }
-  
-  constexpr int buffsize{500};//TODO: extract to func
+  key.get() = find_unique_key(ctx, key_str); // TODO: add set() to keyRaii
+  if (auto err{gpgme_op_verify(ctx.get(), data_sig.get(), nullptr,
+                               data_plain.get())};
+      err != GPG_ERR_NO_ERROR) {
+    pam_syslog(pamh, LOG_WARNING,
+               string{"Verification failed "s + gpgme_strerror(err)}.c_str());
+    return false;
+  }
+
+  constexpr int buffsize{500}; // TODO: extract to func
   char buf[buffsize + 1] = "";
-  int ret = gpgme_data_seek (data_plain.get(), 0, SEEK_SET);
+  int ret = gpgme_data_seek(data_plain.get(), 0, SEEK_SET);
   string plainFromSig{};
-  while ((ret = gpgme_data_read (data_plain.get(), buf, buffsize)) > 0)
-    {
-      buf[ret] = '\0';
-      plainFromSig += string{buf};
-    }
-  
+  while ((ret = gpgme_data_read(data_plain.get(), buf, buffsize)) > 0) {
+    buf[ret] = '\0';
+    plainFromSig += string{buf};
+  }
+
   auto res{gpgme_op_verify_result(ctx.get())};
-  if (!res)
-    {
-      pam_syslog(pamh, LOG_WARNING, "gpgme_op_verify_result() returned nullptr");
-      return false;
-    }
-  for (auto s{res->signatures}; s; s = s->next)
-    {
-      if ((s->summary & GPGME_SIGSUM_VALID) &&
-	  string{key.get()->fpr}.find(string{s->fpr}) != string::npos  &&
-	  plainFromSig == text)
-	return true;
-    }
+  if (!res) {
+    pam_syslog(pamh, LOG_WARNING, "gpgme_op_verify_result() returned nullptr");
+    return false;
+  }
+  for (auto s{res->signatures}; s; s = s->next) {
+    if ((s->summary & GPGME_SIGSUM_VALID) &&
+        string{key.get()->fpr}.find(string{s->fpr}) != string::npos &&
+        plainFromSig == text)
+      return true;
+  }
   return false;
 }
 
-string recurseFind(string mountPoint, string sigName)
-{
-  for(auto& p: fs::directory_iterator(mountPoint))
-    {
-      string candidate{string{p.path()} + "/"s + sigName};
-      if (fs::exists(candidate))
-	  return candidate;
-    }
+string recurseFind(string mountPoint, string sigName) {
+  for (auto &p : fs::directory_iterator(mountPoint)) {
+    string candidate{string{p.path()} + "/"s + sigName};
+    if (fs::exists(candidate))
+      return candidate;
+  }
   return ""s;
 }
 
@@ -91,37 +93,36 @@ string recurseFind(string mountPoint, string sigName)
   validate that the user is able to provide an agreed upon file via USB dongle,
   signed by a key that was preconfigured.
 */
-PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, const char **argv )
-{
+PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
+                                   const char **argv) {
 #ifdef HAVE_PAM_FAIL_DELAY
-  pam_fail_delay (pamh, 2'000'000);
+  pam_fail_delay(pamh, 2'000'000);
 #endif /* HAVE_PAM_FAIL_DELAY */
 
   constexpr auto maxUsernameSize = 100;
   const char *userChar[maxUsernameSize]{nullptr};
 
-  //get user name, or fail
-  if (pam_get_user(pamh, userChar, nullptr)!=PAM_SUCCESS || !userChar || !*userChar)
-    {
-      pam_syslog(pamh, LOG_WARNING, "pam_get_user() failed");
-      return PAM_USER_UNKNOWN;
-    }
+  // get user name, or fail
+  if (pam_get_user(pamh, userChar, nullptr) != PAM_SUCCESS || !userChar ||
+      !*userChar) {
+    pam_syslog(pamh, LOG_WARNING, "pam_get_user() failed");
+    return PAM_USER_UNKNOWN;
+  }
   string user{*userChar, maxUsernameSize - 1};
 
-  //get homedir, or fail
+  // get homedir, or fail
   auto userPw(getpwnam(user.c_str()));
-  if (!userPw)
-    {
-      pam_syslog(pamh, LOG_WARNING, "can't get homedir of pam user");
-      return  PAM_AUTHINFO_UNAVAIL;
-    }
+  if (!userPw) {
+    pam_syslog(pamh, LOG_WARNING, "can't get homedir of pam user");
+    return PAM_AUTHINFO_UNAVAIL;
+  }
   string homeDir{userPw->pw_dir};
-  //drop privilleges, or fail
+  // drop privilleges, or fail
   privDropper priv{pamh, userPw};
   string sigName{"lastresort.sig"s};
   auto gpHomeCstr{pam_getenv(pamh, "GNUPGHOME")};
-  string gnupgHome{gpHomeCstr?gpHomeCstr:".gnupg"s};
-  gpgme_ctx_raii ctx{homeDir+"/"s+gnupgHome};
+  string gnupgHome{gpHomeCstr ? gpHomeCstr : ".gnupg"s};
+  gpgme_ctx_raii ctx{homeDir + "/"s + gnupgHome};
   string currentPath{homeDir + "/.lastresort_rollingstate"s};
   string nextNonce{getNonce(10)};
   fstream curr{currentPath, ios::in | ios::out};
@@ -132,22 +133,19 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   string mountPoint{};
   ifstream conf{homeDir + "/.lastresort_conf"s};
 
-  if (!conf)
-    {
-      pam_syslog(pamh, LOG_WARNING, "no config found for user");
-      return PAM_IGNORE;
-    }
-  if (!curr || !curr.good() || !curr.is_open())
-    {
-      pam_syslog(pamh, LOG_WARNING, "missing current state");
-      return PAM_AUTH_ERR;
-    }
+  if (!conf) {
+    pam_syslog(pamh, LOG_WARNING, "no config found for user");
+    return PAM_IGNORE;
+  }
+  if (!curr || !curr.good() || !curr.is_open()) {
+    pam_syslog(pamh, LOG_WARNING, "missing current state");
+    return PAM_AUTH_ERR;
+  }
   conf >> trustedFprt;
-  if (!conf)
-    {
-      pam_syslog(pamh, LOG_WARNING, "bad config, missing path");
-      return PAM_AUTH_ERR;
-    }
+  if (!conf) {
+    pam_syslog(pamh, LOG_WARNING, "bad config, missing path");
+    return PAM_AUTH_ERR;
+  }
   conf >> mountPoint;
   curr >> machineId;
   nextRotate = machineId + " "s + nextNonce;
@@ -156,70 +154,66 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t *pamh, int flags, int argc, con
   curr.clear();
   curr.seekp(0);
 
-  if (flags & PAM_SILENT)
-    {
-      pam_syslog(pamh, LOG_WARNING, "can't operate in silent mode");
-      return PAM_IGNORE;
-    }
-  
+  if (flags & PAM_SILENT) {
+    pam_syslog(pamh, LOG_WARNING, "can't operate in silent mode");
+    return PAM_IGNORE;
+  }
+
   string clearMsg{"Please insert USB drive with "s + sigName +
-      "\nContaining signature of the following (NO NEWLINE):\n"s +
-      currStr + "\nby key corresponding to fingerprint:\n"s + trustedFprt +
-      "\nUpon success " + sigName + " will ratchet forward.\n"};
-  
+                  "\nContaining signature of the following (NO NEWLINE):\n"s +
+                  currStr + "\nby key corresponding to fingerprint:\n"s +
+                  trustedFprt + "\nUpon success " + sigName +
+                  " will ratchet forward.\n"};
+
   auto response{converse(pamh, clearMsg)};
   string sigPath{recurseFind(mountPoint, sigName)};
-  if (sigPath == ""s)
-    {
-      pam_syslog(pamh, LOG_WARNING, "signature candidate file not found");
-      return PAM_AUTH_ERR;
-    }
+  if (sigPath == ""s) {
+    pam_syslog(pamh, LOG_WARNING, "signature candidate file not found");
+    return PAM_AUTH_ERR;
+  }
   ifstream sigStream{sigPath};
-  if (!sigStream || !sigStream.good() || !sigStream.is_open())
-    {
-      pam_syslog(pamh, LOG_WARNING, "can't open signature file");
-      return PAM_AUTH_ERR;
-    }
+  if (!sigStream || !sigStream.good() || !sigStream.is_open()) {
+    pam_syslog(pamh, LOG_WARNING, "can't open signature file");
+    return PAM_AUTH_ERR;
+  }
   stringstream buffer;
   buffer << sigStream.rdbuf();
   sigStream.close();
 
-  if (validate_string_signed(pamh, ctx, currStr, buffer.str(), trustedFprt))
-    {
-      //let the user keep a copy of the next sign requirment
-      //TODO: update sigOvrwrt, curr together atomically
-      ofstream sigOvrwrt{sigPath};
-      sigOvrwrt << nextRotate << endl;
-      //update the module's next sign requirement
-      curr << nextRotate << endl;
-      return PAM_SUCCESS;
-    }
+  if (validate_string_signed(pamh, ctx, currStr, buffer.str(), trustedFprt)) {
+    // let the user keep a copy of the next sign requirment
+    // TODO: update sigOvrwrt, curr together atomically
+    ofstream sigOvrwrt{sigPath};
+    sigOvrwrt << nextRotate << endl;
+    // update the module's next sign requirement
+    curr << nextRotate << endl;
+    return PAM_SUCCESS;
+  }
 
   return PAM_AUTH_ERR;
 }
 
-
-PAM_EXTERN int pam_sm_setcred( pam_handle_t *pamh, int flags, int argc, const char **argv )
-{
+PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc,
+                              const char **argv) {
   return PAM_IGNORE;
 }
 
-PAM_EXTERN int pam_sm_acct_mgmt( pam_handle_t *pamh, int flags, int argc, const char **argv )
-{
+PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
+                                const char **argv) {
   return PAM_IGNORE;
 }
 
-PAM_EXTERN int pam_sm_open_session( pam_handle_t *pamh, int flags, int argc, const char **argv )
-{
+PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
+                                   const char **argv) {
   return PAM_IGNORE;
 }
 
-PAM_EXTERN int pam_sm_close_session( pam_handle_t *pamh, int flags, int argc, const char **argv )
-{
+PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc,
+                                    const char **argv) {
   return PAM_IGNORE;
 }
 
-PAM_EXTERN int pam_sm_chauthtok( pam_handle_t *pamh, int flags, int argc, const char **argv )
-{
+PAM_EXTERN int pam_sm_chauthtok(pam_handle_t *pamh, int flags, int argc,
+                                const char **argv) {
   return PAM_IGNORE;
 }
