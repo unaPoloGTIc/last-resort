@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 
 using namespace std;
 using namespace commonRaii;
@@ -79,13 +80,26 @@ bool validate_string_signed(pam_handle_t *pamh, gpgme_ctx_raii &ctx,
   return false;
 }
 
-string recurseFind(string mountPoint, string sigName) {
-  for (auto &p : fs::directory_iterator(mountPoint)) {
-    string candidate{string{p.path()} + "/"s + sigName};
-    if (fs::exists(candidate))
-      return candidate;
+optional<string> recurseFind(string mountPoint, string sigName) {
+  auto append_to_dir = [](fs::path dir, string fname) { return dir / fname; };
+  auto regular_existing = [](fs::path pat) {
+    return (fs::exists(pat) && fs::is_regular_file(pat));
+  };
+
+  if (auto rp = append_to_dir(fs::path(mountPoint), sigName);
+      regular_existing(rp)) {
+    return string{rp};
   }
-  return ""s;
+
+  for (auto const &p : fs::recursive_directory_iterator(mountPoint)) {
+    if (p.is_directory()) {
+      if (auto ap = append_to_dir(p.path(), sigName); regular_existing(ap)) {
+        return string{ap};
+      }
+    }
+  }
+
+  return {};
 }
 
 /*
@@ -124,7 +138,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   string gnupgHome{gpHomeCstr ? gpHomeCstr : ".gnupg"s};
   gpgme_ctx_raii ctx{homeDir + "/"s + gnupgHome};
   string currentPath{homeDir + "/.lastresort_rollingstate"s};
-  string nextNonce{getNonce(10)};
+  string nextNonce{getNonce(30)};
   fstream curr{currentPath, ios::in | ios::out};
   string machineId{};
   string nextRotate{};
@@ -166,8 +180,10 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
                   " will ratchet forward.\n"};
 
   auto response{converse(pamh, clearMsg)};
-  string sigPath{recurseFind(mountPoint, sigName)};
-  if (sigPath == ""s) {
+  string sigPath{};
+  if (auto rf = recurseFind(mountPoint, sigName)) {
+    sigPath = *rf;
+  } else {
     pam_syslog(pamh, LOG_WARNING, "signature candidate file not found");
     return PAM_AUTH_ERR;
   }

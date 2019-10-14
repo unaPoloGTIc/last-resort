@@ -34,6 +34,7 @@ You need to plug in a USB drive with a file named "lastresort.sig"
 Containing a signature by the configured key of the current ~/.lastresort_rollingstate  
 A reminder of rollingstate will be printed, and if auth was granted,  
 lastresort.sig will be overwritten with the next rollingstate to be signed for the next login.  
+The module looks for the file recursively, using the first match.  
 
 ## Security considerations:
 Very similar to the trex-pam.so module by the same authors.  
@@ -41,8 +42,8 @@ With the exceptions that:
 1: the random challenge only rotates upon success.  
 So brute force attacks are more of an issue,  
 hopefully offset by the requirement of physical presence.  
-(Still, requires signing a guessed 10 char long,  
-a-zA-Z0-9 nonce, given good randomness this puts us at one in over a billion.)  
+(Still, requires signing a guessed 30 char long,  
+a-zA-Z0-9 nonce.)  
 2: physical access to plug in a USB drive is required.  
 
 (at the very least, attacker must be able to mount volumes  
